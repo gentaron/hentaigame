@@ -13,7 +13,13 @@ export class RhythmGame {
         this.combo = 0;
         this.notes = [];
         this.lastSpawnTime = 0;
-        this.spawnInterval = 1000; // Spawn a note every 1 second
+        this.spawnInterval = 1000; // Base spawn interval
+
+        // Pattern system
+        this.currentPatternIndex = 0;
+        this.patternTimer = 0;
+        this.patternDuration = 10000; // 10 seconds per pattern
+        this.patterns = this.createPatterns();
 
         // Game constants
         this.judgmentLineX = this.canvas.width / 2;
@@ -27,6 +33,118 @@ export class RhythmGame {
 
         // Animation frame
         this.lastTime = 0;
+
+        // UI effects
+        this.comboScale = 1.0;
+        this.scoreFlash = 0;
+    }
+
+    createPatterns() {
+        return [
+            // Pattern 1: Normal - Steady rhythm
+            {
+                name: "Normal Beat",
+                spawnInterval: 1000,
+                noteSpeed: 200,
+                variations: () => ({ y: this.laneY })
+            },
+
+            // Pattern 2: Fast - Quick succession
+            {
+                name: "Speed Rush",
+                spawnInterval: 500,
+                noteSpeed: 300,
+                variations: () => ({ y: this.laneY })
+            },
+
+            // Pattern 3: Slow - Relaxed pace
+            {
+                name: "Chill Wave",
+                spawnInterval: 1500,
+                noteSpeed: 150,
+                variations: () => ({ y: this.laneY })
+            },
+
+            // Pattern 4: Double Lanes - Top and bottom
+            {
+                name: "Double Trouble",
+                spawnInterval: 800,
+                noteSpeed: 200,
+                variations: () => ({
+                    y: Math.random() > 0.5 ? this.laneY - 30 : this.laneY + 30
+                })
+            },
+
+            // Pattern 5: Wave - Sine wave motion
+            {
+                name: "Wave Motion",
+                spawnInterval: 700,
+                noteSpeed: 180,
+                variations: (noteCount) => ({
+                    y: this.laneY,
+                    wave: true,
+                    waveOffset: noteCount * 0.5
+                })
+            },
+
+            // Pattern 6: Burst - Random fast clusters
+            {
+                name: "Burst Fire",
+                spawnInterval: 300,
+                noteSpeed: 250,
+                variations: () => ({ y: this.laneY }),
+                burstMode: true
+            },
+
+            // Pattern 7: Zigzag - Alternating positions
+            {
+                name: "Zigzag",
+                spawnInterval: 600,
+                noteSpeed: 220,
+                variations: (noteCount) => ({
+                    y: noteCount % 2 === 0 ? this.laneY - 40 : this.laneY + 40
+                })
+            },
+
+            // Pattern 8: Random Chaos - Unpredictable
+            {
+                name: "Chaos Mode",
+                spawnInterval: 400,
+                noteSpeed: 200 + Math.random() * 100,
+                variations: () => ({
+                    y: this.laneY + (Math.random() - 0.5) * 60,
+                    speed: 150 + Math.random() * 150
+                })
+            },
+
+            // Pattern 9: Accelerando - Gradually faster
+            {
+                name: "Accelerando",
+                spawnInterval: 1000,
+                noteSpeed: 180,
+                variations: (noteCount) => ({
+                    y: this.laneY,
+                    speed: 180 + noteCount * 5
+                })
+            },
+
+            // Pattern 10: Triple Stream - Three lanes
+            {
+                name: "Triple Stream",
+                spawnInterval: 500,
+                noteSpeed: 210,
+                variations: (noteCount) => {
+                    const lane = noteCount % 3;
+                    return {
+                        y: this.laneY + (lane - 1) * 35
+                    };
+                }
+            }
+        ];
+    }
+
+    getCurrentPattern() {
+        return this.patterns[this.currentPatternIndex];
     }
 
     resizeCanvas() {
@@ -65,6 +183,9 @@ export class RhythmGame {
         this.combo = 0;
         this.notes = [];
         this.lastSpawnTime = 0;
+        this.patternTimer = 0;
+        this.currentPatternIndex = 0;
+        this.noteCount = 0;
         this.lastTime = performance.now();
         this.gameLoop();
     }
@@ -74,13 +195,21 @@ export class RhythmGame {
     }
 
     spawnNote() {
+        const pattern = this.getCurrentPattern();
+        const variations = pattern.variations(this.noteCount);
+
         const note = {
-            x: this.canvas.width, // Start from right edge
-            y: this.laneY,
+            x: this.canvas.width,
+            y: variations.y || this.laneY,
             radius: 20,
-            hit: false
+            hit: false,
+            speed: variations.speed || pattern.noteSpeed,
+            wave: variations.wave || false,
+            waveOffset: variations.waveOffset || 0
         };
+
         this.notes.push(note);
+        this.noteCount++;
     }
 
     handleHit() {
@@ -102,6 +231,8 @@ export class RhythmGame {
             closestNote.hit = true;
             this.score += 100;
             this.combo++;
+            this.comboScale = 1.3; // Bounce effect
+            this.scoreFlash = 1.0; // Flash effect
 
             // Visual feedback
             this.showHitEffect(closestNote);
@@ -122,9 +253,20 @@ export class RhythmGame {
     update(deltaTime) {
         const deltaSeconds = deltaTime / 1000;
 
-        // Spawn notes
+        // Update pattern timer
+        this.patternTimer += deltaTime;
+        if (this.patternTimer >= this.patternDuration) {
+            this.currentPatternIndex = (this.currentPatternIndex + 1) % this.patterns.length;
+            this.patternTimer = 0;
+            this.noteCount = 0;
+            console.log(`Pattern switched to: ${this.getCurrentPattern().name}`);
+        }
+
+        // Spawn notes based on current pattern
+        const pattern = this.getCurrentPattern();
         this.lastSpawnTime += deltaTime;
-        if (this.lastSpawnTime >= this.spawnInterval) {
+
+        if (this.lastSpawnTime >= pattern.spawnInterval) {
             this.spawnNote();
             this.lastSpawnTime = 0;
         }
@@ -134,7 +276,12 @@ export class RhythmGame {
             const note = this.notes[i];
 
             // Move note towards judgment line
-            note.x -= this.noteSpeed * deltaSeconds;
+            note.x -= note.speed * deltaSeconds;
+
+            // Wave motion if enabled
+            if (note.wave) {
+                note.y = this.laneY + Math.sin(note.x * 0.01 + note.waveOffset) * 30;
+            }
 
             // Update hit effect
             if (note.hitEffect) {
@@ -151,16 +298,19 @@ export class RhythmGame {
                 this.combo = 0; // Miss
             }
         }
+
+        // Update UI effects
+        this.comboScale = Math.max(1.0, this.comboScale - deltaSeconds * 2);
+        this.scoreFlash = Math.max(0, this.scoreFlash - deltaSeconds * 3);
     }
 
     draw() {
         // Clear canvas to transparent to show background
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Optional: Add slight dark overlay for better contrast (adjust opacity as needed)
+        // Optional: Add slight dark overlay for better contrast
         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
 
         // Draw lane
         this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
@@ -188,8 +338,12 @@ export class RhythmGame {
                 this.ctx.arc(note.x, note.y, radius, 0, Math.PI * 2);
                 this.ctx.fill();
             } else if (!note.hit) {
-                // Regular note
-                this.ctx.fillStyle = '#ff00ff';
+                // Regular note with gradient
+                const gradient = this.ctx.createRadialGradient(note.x, note.y, 0, note.x, note.y, note.radius);
+                gradient.addColorStop(0, '#ff00ff');
+                gradient.addColorStop(1, '#8800ff');
+
+                this.ctx.fillStyle = gradient;
                 this.ctx.beginPath();
                 this.ctx.arc(note.x, note.y, note.radius, 0, Math.PI * 2);
                 this.ctx.fill();
@@ -201,21 +355,61 @@ export class RhythmGame {
             }
         }
 
-        // Draw score and combo
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = 'bold 32px Arial';
-        this.ctx.textAlign = 'left';
-        this.ctx.fillText(`Score: ${this.score}`, 20, 50);
+        // Draw modern Score with gradient and shadow
+        this.ctx.save();
+        this.ctx.shadowColor = 'rgba(102, 126, 234, 0.8)';
+        this.ctx.shadowBlur = 20 + this.scoreFlash * 30;
 
+        const scoreGradient = this.ctx.createLinearGradient(20, 30, 20, 70);
+        scoreGradient.addColorStop(0, '#667eea');
+        scoreGradient.addColorStop(1, '#764ba2');
+
+        this.ctx.fillStyle = scoreGradient;
+        this.ctx.font = 'bold 48px "Segoe UI", Arial, sans-serif';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText(`${this.score}`, 20, 60);
+
+        // Score label
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        this.ctx.font = '16px "Segoe UI", Arial, sans-serif';
+        this.ctx.fillText('SCORE', 20, 30);
+        this.ctx.restore();
+
+        // Draw modern Combo with scale effect
         if (this.combo > 0) {
-            this.ctx.fillStyle = '#ffff00';
-            this.ctx.font = 'bold 24px Arial';
-            this.ctx.fillText(`Combo: ${this.combo}`, 20, 90);
+            this.ctx.save();
+            this.ctx.translate(20, 130);
+            this.ctx.scale(this.comboScale, this.comboScale);
+
+            this.ctx.shadowColor = 'rgba(255, 223, 0, 0.9)';
+            this.ctx.shadowBlur = 25;
+
+            const comboGradient = this.ctx.createLinearGradient(0, -20, 0, 20);
+            comboGradient.addColorStop(0, '#FFD700');
+            comboGradient.addColorStop(1, '#FF8C00');
+
+            this.ctx.fillStyle = comboGradient;
+            this.ctx.font = 'bold 42px "Segoe UI", Arial, sans-serif';
+            this.ctx.textAlign = 'left';
+            this.ctx.fillText(`${this.combo}x`, 0, 0);
+
+            // Combo label
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            this.ctx.font = '14px "Segoe UI", Arial, sans-serif';
+            this.ctx.fillText('COMBO', 0, -25);
+            this.ctx.restore();
         }
+
+        // Draw pattern name
+        const pattern = this.getCurrentPattern();
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        this.ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
+        this.ctx.textAlign = 'right';
+        this.ctx.fillText(pattern.name, this.canvas.width - 20, 40);
 
         // Draw instructions
         this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        this.ctx.font = '18px Arial';
+        this.ctx.font = '18px "Segoe UI", Arial, sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.fillText('Press SPACE or CLICK when notes reach the green line!', this.canvas.width / 2, this.canvas.height - 30);
     }
